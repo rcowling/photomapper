@@ -1,0 +1,547 @@
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no", content="width=device-width">
+  <title>Sanborn Building Image Viewer Beta</title>  
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1.0/build/openseadragon/openseadragon.min.js"></script>
+  <link rel="stylesheet" href="https://js.arcgis.com/4.28/esri/themes/light/main.css">
+  <script src="https://js.arcgis.com/4.28/"></script>
+  <style>
+    /*Map container*/
+#viewDiv {
+  position: absolute;
+  top: 0;
+  bottom: 0;        
+  padding: 0;
+  margin-top: 56px;        
+  width: 50%;
+}
+
+.esri-ui .esri-popup  {
+  display:  none !important;
+ }  
+
+ #offcanvasRight {
+  width: 50%;
+  margin-top: 56px;
+ }   
+
+ .responsive {
+  width: 100%;
+  height: auto;
+}
+
+.navbar {
+  height: 56px !important;
+  --bs-navbar-padding-y: 0 !important;
+}
+
+.navbar-brand {
+  padding: 0 0px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;   
+}
+
+#sidebar {
+  margin-top: 56px;
+}
+
+
+.bg-body-tertiary {
+  background-color: #363636 !important; 
+}
+
+.pulsing-dot{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%,-50%);
+    width: 20px;
+    height: 20px;
+    background-color: rgb(255, 0, 0);
+    color: white;
+    text-align: center;
+    line-height: 100px;
+    font-family: 'Lucida Sans', 'Lucida Sans Regular', 'Lucida Grande', 'Lucida Sans Unicode', Geneva, Verdana, sans-serif;
+    border-radius: 50%;
+    font-size: 1.3rem;
+    &:hover{
+        cursor: pointer;
+    }
+    &::after,&::before{
+        content: "";
+        display: block;
+        position: absolute;
+        top:0;
+        left:0;
+        width: 20px;
+        height: 20px;
+        background: rgba(255, 0, 0,1);
+        border-radius: 50%;
+        z-index: -1;
+        animation: grow 1.3s ease-in-out infinite;
+    }
+    &::after{
+        background: rgba(255, 0, 0,0.4);
+        &::before{
+        content: "";
+        display: block;
+        position: absolute;
+        top:0;
+        left:0;
+        width: 20px;
+        height: 20px;
+        background: rgb(95, 132, 255);
+        border-radius: 50%;
+        z-index: -1;
+        animation: grow 1.3s ease-in-out infinite;
+        }
+    }
+    &::before{
+        background: rgba(255, 0, 0,.6);
+        animation-delay: -0.5s;
+    }
+}
+@keyframes grow{
+    0%{
+        transform: scale(1,1);
+        opacity: 1;
+    }
+    100%{
+        transform: scale(1.8,1.8);
+        opacity: 0;
+    }
+}
+
+  </style>
+  <script>
+  require([
+    "esri/config",
+    "esri/Map",
+    "esri/views/MapView",
+    "esri/layers/FeatureLayer",
+    "esri/layers/TileLayer",
+    "esri/core/reactiveUtils"
+  ], function(esriConfig, Map, MapView, FeatureLayer, TileLayer,  reactiveUtils) {
+
+  let highlight = null;
+
+  const bsOffcanvas = new bootstrap.Offcanvas('#offcanvasRight');
+  const sideBar = new bootstrap.Offcanvas('#sidebar');
+  const table = document.getElementById("census-table");
+  const recName = document.getElementById('rec-name');
+  const recModal = new bootstrap.Modal('#recModal', {
+    keyboard: false,
+    backdrop: false
+  });
+
+  const modal = document.getElementsByClassName("modal-dialog");
+  const personList = document.getElementById('list-group');
+
+
+  esriConfig.apiKey = "YOUR_API_KEY";
+
+  const viewer = OpenSeadragon({
+    id: "openseadragon1",
+    prefixUrl: "https://cdn.jsdelivr.net/npm/openseadragon@2.4/build/openseadragon/images/",
+    maxZoomLevel: null, 
+    tileSources: {
+      type: "image",
+      url: "https://cchi-iif.mtu.edu/iiif/3/OBECTID18.jpg/full/max/0/default.jpg"
+    },   
+  });
+
+  bsOffcanvas.show();
+
+  const map = new Map({
+    basemap: "satellite"
+  });
+
+  const view = new MapView({
+    container: "viewDiv",
+    map: map,
+    center: [-88.461665, 47.247159],
+    zoom: 18
+  });
+  
+  const footprints_1908 = new FeatureLayer({
+    url: "https://portal1-geo.sabu.mtu.edu/server/rest/services/Hosted/sanborn_1908_footprints_with_image_coords/FeatureServer/0",
+    popupEnabled: true,
+    definitionExpression: "img_coords is not null",
+    outFields: ["*"]
+  });
+
+  map.add(footprints_1908, 1);
+
+  // historical person geocoded record locations layer
+  const recLocs = new FeatureLayer({
+    url: "https://portal1-geo.sabu.mtu.edu/server/rest/services/Hosted/giscore_grf_kett_record_locs/FeatureServer",
+    id: "reclocs",
+    outFields: ["*"]
+  });
+
+   // historical census records
+   const censusRecs = new FeatureLayer({
+      url: "https://portal1-geo.sabu.mtu.edu/server/rest/services/Hosted/cesnsus_records_allyears/FeatureServer",
+      id: "cenrecs",
+      outFields: ["*"]
+    });
+
+  const sanborn_1908 = new TileLayer({
+    url: "https://portal1-geo.sabu.mtu.edu:6443/arcgis/rest/services/KeweenawHSDI/KeTT_1908_FIPS/MapServer"
+  });
+
+  map.add(sanborn_1908, 0);
+
+  // Create a popup template for the photos layer
+  footprints_1908.popupTemplate = {
+    title:'footprint',
+    content: "Description"    
+  };
+  
+  viewer.addHandler('open', function() {
+    var tiledImage = viewer.world.getItemAt(0);
+    var imgWidth = tiledImage.getContentSize().x;
+    var imgHeight = tiledImage.getContentSize().y;
+    
+    console.log("Image dimensions in pixels:", imgWidth, imgHeight);
+    // get data for the image overlay from the hosted table
+     fetch('https://portal1-geo.sabu.mtu.edu/server/rest/services/Hosted/image_map/FeatureServer/0/query?where=1%3D1&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&distance=&units=esriSRUnit_Foot&relationParam=&outFields=*&returnGeometry=true&maxAllowableOffset=&geometryPrecision=&outSR=&havingClause=&gdbVersion=&historicMoment=&returnDistinctValues=false&returnIdsOnly=false&returnCountOnly=false&returnExtentOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&multipatchOption=xyFootprint&resultOffset=&resultRecordCount=&returnTrueCurves=false&returnCentroid=false&timeReferenceUnknownClient=false&sqlFormat=none&resultType=&datumTransformation=&lodType=geohash&lod=&lodSR=&f=pjson')
+      .then(response => response.json())
+      .then(data => {
+        console.log(data);
+        const overlays = data.features;
+        // loop over all rows in the table and create overlays
+        overlays.forEach(function(overlay, index) {
+          const coordsArr = overlay.attributes.rect_coords; // the rectangles coordinates
+          const buildingId = overlay.attributes.building_id;
+          console.log(buildingId);
+          const rectCoords = coordsArr.split(",");
+
+          // convert to float values to work with OpenSeaDragon
+          const x1 = parseFloat(rectCoords[0]);
+          const y1 = parseFloat(rectCoords[1]);
+          const width1 = parseFloat(rectCoords[2]) - x1;
+          const height1 = parseFloat(rectCoords[3]) -y1;
+
+          // create the rectangle from these coords
+          var viewportRect = viewer.viewport.imageToViewportRectangle(x1, y1, width1, height1);
+
+          // Create an HTML element for the overlay
+          var overlay = document.createElement("div");
+          overlay.style.border = "2px solid blue"; // Example styling
+          overlay.style.opacity = "0";
+
+          // Set data-building-id attribute on the overlay element
+          overlay.setAttribute("data-building-id", buildingId);
+          console.log(buildingId);
+
+          // Add overlay to the viewer
+          viewer.addOverlay({
+              element: overlay,
+              location: viewportRect
+          });
+       // when the user clicks on an overlay
+       new OpenSeadragon.MouseTracker({
+        element: overlay,
+        clickHandler: e => view.whenLayerView(footprints_1908).then((layerView) => {            
+            viewer.removeOverlay("img-pin"); 
+            if (highlight) { highlight.remove(); }       
+             // if there is an overlay on the image, remove it
+            if (overlay == true) {
+              console.log("remove overlay");
+              viewer.removeOverlay("img-pin");        
+            }    
+            footprints_1908.queryFeatures({
+            //query object
+            where: "uniqueid = " + "'" + buildingId + "'",  // "'" + overlay.attributes.building_id + "'",
+            returnGeometry: true,
+            outFields: ["*"],
+          })
+          .then((featureSet) => {
+            console.log(featureSet);
+            const feature = featureSet.features[0];
+
+            document.getElementById("title").innerHTML = feature.attributes.address + ", " + feature.attributes.place_nam;            
+
+            // highlight the corresponding building footprint on the map
+            highlight = layerView.highlight(feature.attributes.objectid);
+
+            view.popup.open();
+
+            // zoom to the corresponding building footprint on the map
+            view.goTo(
+                  {
+                    target: feature.geometry,                    
+                    zoom: 20,
+                  },
+                  {
+                  duration: 2000,
+                  easing: "in-out-expo"
+                })
+            });            
+       }),
+        contextMenuHandler: e => alert('Context menu fired! ' + e.originalEvent.target.id),
+
+      }); 
+   
+        });
+
+      });  
+
+  });
+
+  viewer.addHandler('canvas-click', function(event) {
+    // The canvas-click event gives us a position in web coordinates.
+    var webPoint = event.position;
+
+    // Convert that to viewport coordinates, the lingua franca of OpenSeadragon coordinates.
+    var viewportPoint = viewer.viewport.pointFromPixel(webPoint);
+
+    // Convert from viewport coordinates to image coordinates.
+    var imagePoint = viewer.viewport.viewportToImageCoordinates(viewportPoint);
+
+    // Show the results.
+    console.log(webPoint.toString(), viewportPoint.toString(), imagePoint.toString());
+  });
+
+  // the image does not have an overlay
+  var overlay = false;
+
+ // watch for a click on the building footprints  
+ reactiveUtils.watch(
+  () => view.popup.selectedFeature,
+  (graphic) => {
+    if (graphic) {  
+      if (highlight) { highlight.remove(); }
+      bsOffcanvas.show();  	
+      console.log(graphic);
+      //const imgDesc = graphic.attributes.image_desc;
+      //const imgUrl = graphic.attributes.image_url;
+      const imgCoords = graphic.attributes.img_coords;
+      const address = graphic.attributes.address;
+      const place_name = graphic.attributes.place_nam;
+      const uniqueID = graphic.attributes.uniqueid;
+      const bldgID = graphic.attributes.join_id + "|" + graphic.attributes.place_nam + "|bldg";
+
+      // query for the person information in buildings
+      let query = recLocs.createQuery();
+        // query the person record locations for all people living in the bldgID
+        query.where = "loccode = '" + bldgID + "' AND typedescr = 'people' AND byear = 1910.000000" ;
+        query.outFields = ["recordid", "entitytype", "byear", "stitle", "descr", "loccode", "geodescr"];
+        // execute the query for the historical records based on the id of the building clicked
+        recLocs.queryFeatures(query)
+          .then(function(response) {
+            console.log(response);
+            if (response.features.length > 0) {
+
+            // Clear existing list group content
+            const listGroupContainer = document.getElementById('list-group');
+            listGroupContainer.innerHTML = '';
+
+            const features = response.features;
+
+            // Dynamically generate list group items
+            features.forEach((feature, index) => {
+              const { stitle, descr, byear, geodescr } = feature.attributes;
+
+              // Generate list group item HTML
+              const listGroupItemHTML = `
+                <a href="#" class="list-group-item list-group-item-action">
+                  <div class="d-flex w-100 justify-content-between">
+                    <h5 class="mb-1">${stitle}</h5>
+                    <small class="text-muted">${byear ? byear : 'Unknown Year'}</small>
+                  </div>
+                  <p class="mb-1">${descr}</p>
+                  <small class="text-muted">${geodescr}</small>
+                </a>
+              `;
+
+              // Append to the list group container
+              listGroupContainer.insertAdjacentHTML('beforeend', listGroupItemHTML);
+            });           
+
+            // Add click event listener to list group items
+            listGroupContainer.querySelectorAll('.list-group-item').forEach((item, index) => {
+              item.addEventListener('click', (e) => {
+                e.preventDefault(); // Prevent default anchor behavior
+
+                // Access the clicked feature's attributes
+                const clickedFeature = features[index];
+                const recId = clickedFeature.attributes.recordid;
+                // For the clicked record, query any census records for that person
+                let censusQuery = censusRecs.createQuery();
+                censusQuery.where = "recordid = '" + recId + "'" ; // use the person records ID number in the Census Records layer
+                censusQuery.outFields = ["*"];
+                // Execute the query for a persons' census records
+                censusRecs.queryFeatures(censusQuery)
+                  .then(function(response) {
+                    if (response.features.length > 0) {
+                    const features = response.features[0].attributes;
+
+                    const fieldNames = {
+                      namefirst: "First Name",
+                      namelast: "Last Name",
+                      occupation: "Occupation",
+                      ownership: "Ownership",
+                      race: "Race",
+                      relhouse: "Relation to Householder",
+                      industry: "Industry",
+                      age: "Age",
+                      birthplace: "Birthplace",
+                      birthyear: "Birth Year",
+                      canread: "Can Read",
+                      canwrite: "Can Write",
+                      censusyear: "Census Year",
+                      citizenship: "Citizenship",
+                      fbirthplace: "Father's Birthplace",
+                      mstatus: "Marital Status",
+                      natvlang: "Native Language",
+                      speakeng: "Speaks English",
+                      speaks: "Other Languages Spoken",
+                      sex: "Sex",
+                      wrkrclass: "Worker Class",
+                      year_immigrated: "Year Immigrated"
+                    };   
+                    
+                    recName.textContent = clickedFeature.attributes.stitle;
+                    table.innerHTML = ""; // Clear existing table content
+                    // Populate bootstrap Table with the attributes for the Census record. 
+                    for (const key in fieldNames) {
+                      if (features.hasOwnProperty(key)) {
+                        const row = document.createElement("tr");
+                        row.innerHTML = `<td><strong>${fieldNames[key]}</strong></td><td>${features[key] ?? 'N/A'}</td>`;
+                        table.appendChild(row);
+                      }
+                    }
+                  } else {
+                    table.innerHTML = '<i>There is no Census record available for this person during this time period.</i>'
+                    recName.textContent = "No Record Found"
+                  }
+
+                  });
+                  recModal.show();
+              });
+            });
+             } else {
+              document.getElementById('list-group').innerHTML = '<i>No historical person records can be found for this building during this time period. Try clicking on another building.</i>';
+            }
+            document.getElementById('offcanvasScrollingLabel').innerHTML = address;
+            sideBar.show();
+          });
+      
+
+      if (imgCoords != null) {
+
+      const coordsArr = imgCoords.split(",");
+      console.log(coordsArr);
+
+      console.log(overlay);
+
+      // if there is an overlay on the image, remove it
+      if (overlay == true) {
+        viewer.removeOverlay("img-pin");        
+      } 
+
+      const tiledImage = viewer.world.getItemAt(0);
+
+      // Convert string values to floats
+      const imageX = parseFloat(coordsArr[0]);
+      const imageY = parseFloat(coordsArr[1]);
+
+      console.log(imageX, imageY);
+
+      // Convert the image coordinates to viewport coordinates
+      var viewportPoint = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(imageX, imageY));
+
+      // Create an HTML element for the pin
+      var pin = document.createElement("img");
+      pin.src = "https://upload.wikimedia.org/wikipedia/commons/d/d1/Google_Maps_pin.svg"; // URL to the map marker pin image
+      pin.id = "map-pin";
+      pin.className = "highlight"; 
+
+       // Create an HTML element for the dot
+      var dot = document.createElement("div");
+      dot.className = "pulsing-dot";
+      dot.id = "img-pin"
+      
+      // Adjust as necessary to center the dot over the point
+      dot.style.transform = "translate(-50%, -50%)";
+
+    // Add the overlay with normalized coordinates
+    viewer.addOverlay({
+      element: dot,
+      location: viewportPoint 
+    });    
+
+  var deltaX = .2; // Example value, adjust based on how much area you want to show
+  var deltaY = .2; // Example value, adjust based on how much area you want to show
+  var bounds = new OpenSeadragon.Rect(viewportPoint.x - deltaX, viewportPoint.y - deltaY, 2 * deltaX, 2 * deltaY);
+
+  viewer.viewport.fitBounds(bounds, true); // The second parameter enables smooth animation
+  document.getElementById("title").innerHTML = address + ", " + place_name;
+
+  // Center the viewport on the point
+  //viewer.viewport.panTo(viewportPoint, true);
+  // zoom to the point on the image
+  //viewer.viewport.zoomTo(2, viewportPoint, true);
+     // now that there is an overlay set the variable to true 
+      overlay = true;
+  }
+}
+  });
+
+  });
+</script>
+
+</head>
+<body>
+  <nav class="navbar bg-body-tertiary">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">
+      <img src="kettlogo.png" alt="Logo" width="50" height="50" class="d-inline-block align-text-top">
+      <span id="apptitle">1908 Historic Building Image Viewer</span>
+    </a>
+  </div>
+</nav>
+  <div id="viewDiv"></div>
+  <!-- <button class="btn btn-primary" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasRight" aria-controls="offcanvasRight">Toggle right offcanvas</button> -->
+
+<div class="offcanvas offcanvas-end" tabindex="-1" data-bs-scholl="true" data-bs-backdrop="false" id="offcanvasRight" aria-labelledby="offcanvasRightLabel">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="offcanvasRightLabel"><div id="title"></div></h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body">
+   <div id='openseadragon1' class-="responsive"></div>
+  </div>
+</div>
+  <div class="modal" tabindex="-1" id="recModal" data-bs-backdrop="false" data-bs-scroll="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="rec-name">Modal title</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-striped table-bordered" id="census-table">
+</table>
+      </div>      
+    </div>
+  </div>
+</div>
+ <div class="offcanvas offcanvas-start" data-bs-scroll="true" data-bs-backdrop="false" tabindex="-1" id="sidebar" aria-labelledby="offcanvasScrollingLabel">
+      <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="offcanvasScrollingLabel"></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+      </div>
+      <div class="offcanvas-body">
+         <div class="list-group" id="list-group"></div>
+      </div>
+    </div>
+</body>
+</html>
