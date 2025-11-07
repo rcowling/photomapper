@@ -340,7 +340,7 @@
       bsOffcanvas.show();  	
       console.log(graphic);
       //const imgDesc = graphic.attributes.image_desc;
-      //const imgUrl = graphic.attributes.image_url;
+      const imgUrl = graphic.attributes.image_url;
       const imgCoords = graphic.attributes.img_coords;
       const address = graphic.attributes.address;
       const place_name = graphic.attributes.place_nam;
@@ -454,63 +454,81 @@
           });
       
 
-      if (imgCoords != null) {
+     if (imgCoords != null) {
+  // Construct the new IIIF URL safely
+  const newTileSource = `https://cchi-iif.mtu.edu/iiif/3/${imgUrl}/full/max/0/default.jpg`;
+  console.log("New tile source URL:", newTileSource);
 
-      const coordsArr = imgCoords.split(",");
-      console.log(coordsArr);
+  // Show the offcanvas first (so the viewer container is visible)
+  bsOffcanvas.show();
 
-      console.log(overlay);
+  // Clear overlays and world items before loading a new image
+  viewer.clearOverlays();
+  viewer.world.removeAll();
 
-      // if there is an overlay on the image, remove it
-      if (overlay == true) {
-        viewer.removeOverlay("img-pin");        
-      } 
+  // Open a new image in the viewer
+  viewer.open({
+    type: "image",
+    url: newTileSource
+  });
 
-      const tiledImage = viewer.world.getItemAt(0);
+  // 🧩 Wait until the new image is fully opened before using it
+  viewer.addOnceHandler("open", function () {
+    const tiledImage = viewer.world.getItemAt(0);
 
-      // Convert string values to floats
-      const imageX = parseFloat(coordsArr[0]);
-      const imageY = parseFloat(coordsArr[1]);
+    if (!tiledImage) {
+      console.error("Image failed to load or no world item found.");
+      return;
+    }
 
-      console.log(imageX, imageY);
+    const coordsArr = imgCoords.split(",");
+    console.log("Image coordinates array:", coordsArr);
 
-      // Convert the image coordinates to viewport coordinates
-      var viewportPoint = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(imageX, imageY));
+    // Convert string values to floats
+    const imageX = parseFloat(coordsArr[0]);
+    const imageY = parseFloat(coordsArr[1]);
+    console.log("Image X,Y:", imageX, imageY);
 
-      // Create an HTML element for the pin
-      var pin = document.createElement("img");
-      pin.src = "https://upload.wikimedia.org/wikipedia/commons/d/d1/Google_Maps_pin.svg"; // URL to the map marker pin image
-      pin.id = "map-pin";
-      pin.className = "highlight"; 
+    // Convert image coordinates to viewport coordinates safely
+    const viewportPoint = tiledImage.imageToViewportCoordinates(
+      new OpenSeadragon.Point(imageX, imageY)
+    );
 
-       // Create an HTML element for the dot
-      var dot = document.createElement("div");
-      dot.className = "pulsing-dot";
-      dot.id = "img-pin"
-      
-      // Adjust as necessary to center the dot over the point
-      dot.style.transform = "translate(-50%, -50%)";
+    // Remove any previous overlay
+    viewer.removeOverlay("img-pin");
 
-    // Add the overlay with normalized coordinates
+    // Create an HTML element for the dot (marker)
+    const dot = document.createElement("div");
+    dot.className = "pulsing-dot";
+    dot.id = "img-pin";
+    dot.style.transform = "translate(-50%, -50%)";
+
+    // Add overlay at the computed location
     viewer.addOverlay({
       element: dot,
-      location: viewportPoint 
-    });    
+      location: viewportPoint,
+    });
 
-  var deltaX = .2; // Example value, adjust based on how much area you want to show
-  var deltaY = .2; // Example value, adjust based on how much area you want to show
-  var bounds = new OpenSeadragon.Rect(viewportPoint.x - deltaX, viewportPoint.y - deltaY, 2 * deltaX, 2 * deltaY);
+    // Smoothly zoom and center around the pin
+    const deltaX = 0.2;
+    const deltaY = 0.2;
+    const bounds = new OpenSeadragon.Rect(
+      viewportPoint.x - deltaX,
+      viewportPoint.y - deltaY,
+      2 * deltaX,
+      2 * deltaY
+    );
 
-  viewer.viewport.fitBounds(bounds, true); // The second parameter enables smooth animation
-  document.getElementById("title").innerHTML = address + ", " + place_name;
+    viewer.viewport.fitBounds(bounds, true);
+    viewer.forceRedraw();
 
-  // Center the viewport on the point
-  //viewer.viewport.panTo(viewportPoint, true);
-  // zoom to the point on the image
-  //viewer.viewport.zoomTo(2, viewportPoint, true);
-     // now that there is an overlay set the variable to true 
-      overlay = true;
-  }
+    // Update title info
+    document.getElementById("title").innerHTML = `${address}, ${place_name}`;
+
+    overlay = true;
+    console.log("✅ Viewer updated with new image and overlay");
+  });
+}
 }
   });
 
